@@ -1,0 +1,72 @@
+name: "Central Logging Bucket Policy Update"
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  deploy-from-terraform-cloud:
+    name: CloudTrail Policy Update
+    runs-on: ubuntu-latest
+    environment: init-cloutrail-central
+    steps:
+      - name: Checkout from SCM
+        uses: actions/checkout@v2
+
+      - name: Vault - Retrieve AWS Access Keys
+        id: aws-access
+        uses: hashicorp/vault-action@7d98524254c38dc6892804f991526ff30905f643 # v2.4.2
+        with:
+          url: https://husa-220304.applxweb.com
+          method: jwt
+          path: github.com
+          role: aws-iac
+          secrets: |
+            static/data/aws/iac aws_access_key | aws_access_key
+  
+      - name: Vault - Retrieve AWS Secert Keys
+        id: aws-secret
+        uses: hashicorp/vault-action@7d98524254c38dc6892804f991526ff30905f643 # v2.4.2
+        with:
+          url: https://husa-220304.applxweb.com
+          method: jwt
+          path: github.com
+          role: aws-iac
+          secrets: |
+            static/data/aws/iac aws_secret_key | aws_secret_key
+
+## Terraform block
+      - name: Vault - Retrieve TFC Token
+        id: secrets
+        uses: hashicorp/vault-action@v2.4.0
+        with:
+          url: https://husa-220304.applxweb.com
+          method: jwt
+          path: github.com
+          role: tfc-control-workspaces-admin
+          secrets: |
+            terraform/creds/tfc-control-workspaces-admin token
+      - name: Setup workspace variable(s).
+        uses: husa-dtg/vault-creds-to-tfc-workspace@4cae09c7462eff086986efaad6baf1f040ac2d0f # v1.1.0
+        with:
+          tfc_token: ${{ steps.secrets.outputs.token }}
+          organization: applhome
+          workspace: "aws-cloudtrail-central-logging-account"
+          tfe_token: ${{ steps.secrets.outputs.token }}
+          aws_access_key: ${{ steps.aws-access.outputs.aws_access_key }}
+          aws_secret_key: ${{ steps.aws-secret.outputs.aws_secret_key }}
+    # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@17d4c9b8043b238f6f35641cdd8433da1e6f3867 # v2.0.0
+        with:
+          cli_config_credentials_token: ${{ steps.secrets.outputs.token }}
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt
+        continue-on-error: true
+      - name: Terraform Init
+        id: init
+        run: terraform init
+      - name: Terraform apply w/o auto-approve
+        id: apply
+        run: terraform apply
